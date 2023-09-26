@@ -9,13 +9,21 @@ import os
 
 r = redis.StrictRedis(host='localhost', port=6379, db=0, decode_responses=True)
 
-sesiones={}
 
 class WebRequestHandler(BaseHTTPRequestHandler):
+    @cached_property
+    def url(self):
+        return urlparse(self.path)
+
     @cached_property
     def cookies(self):
         # Se obtienen los cookies
         return SimpleCookie(self.headers.get('Cookie'))
+
+    @cached_property
+    def query_data(self):
+        print(dict(parse_qsl(self.url.query)))
+        return dict(parse_qsl(self.url.query))
     
     def do_GET(self):
         method = self.get_method(self.path)
@@ -83,9 +91,31 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html')
         self.end_headers()
 
+        terms = self.query_data
+        books=None
+        links=[]
+
+        if terms and 'term' in terms:
+            #Buscar el term en los libros
+            books=r.sunion(terms['term'].split(' '))
+
+        if not books:
+            books={'No hay resultados'}
+        else:
+            # Genera los enlaces para cada elemento del conjunto
+            for book in books:
+                # Crea el enlace HTML con el elemento como texto y como href
+                link = f'<a href="Book/{book}">Libro {book}</a>'
+                links.append(link)
+
+       
         with open('html/index.html') as f:
             html = f.read()
-        self.wfile.write(html.encode('utf-8'))
+            index = f'''
+            <p>Resultados de busqueda:{', '.join(links)}</p>
+            {html}'''
+
+        self.wfile.write(index.encode('utf-8'))
 
 
     #Funcion encargada de obtener el html del libro y obtener la sesion
@@ -101,6 +131,7 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             html = f'''
             {book_html}
             <p>sesion: {sesion}</p>
+           
             <p>Libro recomendado:<a href="/Book/{book_recomendation}">Libro {book_recomendation}</a></p>'''
             self.wfile.write(html.encode('utf-8'))
         else:
@@ -117,6 +148,7 @@ class WebRequestHandler(BaseHTTPRequestHandler):
 mapping = [
             (r'^/Book/(?P<book_id>\d+)$', 'get_book'),
             (r'^/$', 'get_index'),
+            (r'^/search\?term=.*$', 'get_index'),
             (r'^/Book/-$', 'get_index')
         ]
 
